@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+*.egg
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+*.local
+
+# Database
+*.db
+*.sqlite3
+
+# Debug
+.dbg/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
