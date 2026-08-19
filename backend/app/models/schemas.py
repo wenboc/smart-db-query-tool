@@ -1,4 +1,5 @@
 """使用 camelCase 别名的 API 请求和响应模型。"""
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 from typing import Literal, Any

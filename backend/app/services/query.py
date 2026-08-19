@@ -1,4 +1,5 @@
 """查询历史管理服务。"""
+from __future__ import annotations
 
 from typing import List
 from datetime import datetime, timezone

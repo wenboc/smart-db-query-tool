@@ -1,4 +1,5 @@
 """DatabaseMetadata SQLModel 实体。"""
+from __future__ import annotations
 
 from sqlmodel import SQLModel, Field, Column
 from sqlalchemy import Text, DateTime

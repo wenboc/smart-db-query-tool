@@ -1,4 +1,5 @@
 """DatabaseConnection SQLModel 实体。"""
+from __future__ import annotations
 
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone

@@ -1,4 +1,5 @@
 """管理 PostgreSQL 连接的数据库连接服务。"""
+from __future__ import annotations
 
 import asyncpg
 from typing import Dict

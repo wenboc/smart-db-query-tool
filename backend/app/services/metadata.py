@@ -1,4 +1,5 @@
 """数据库元数据缓存与提取服务。"""
+from __future__ import annotations
 
 import json
 from typing import Dict, Any

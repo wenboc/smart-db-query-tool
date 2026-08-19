@@ -1,4 +1,5 @@
 """基于 sqlglot 的 SQL 校验服务。"""
+from __future__ import annotations
 
 import sqlglot
 from sqlglot import exp
