@@ -1,172 +1,72 @@
-"""数据库高层服务（外观模式）。"""
-
-import time
+"""数据库高层服务（外观模式 + tenacity 指数退避重试）。"""
+import asyncio, logging, time
 from typing import Tuple, Optional
-import logging
-
+from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from app.config import settings
 from app.models.database import DatabaseType
 from app.adapters.base import ConnectionConfig, QueryResult, MetadataResult
 from app.adapters.registry import DatabaseAdapterRegistry, adapter_registry
 from app.services.sql_validator import validate_and_transform_sql, SqlValidationError
 
 logger = logging.getLogger(__name__)
+_TRANSIENT_EXCEPTIONS = (asyncio.TimeoutError, ConnectionRefusedError, ConnectionResetError, BrokenPipeError, OSError)
 
+def _is_retryable(exc):
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS): return True
+    cls = type(exc).__name__.lower()
+    return any(k in cls for k in ("connect", "connection", "pool", "timeout", "reset", "refused", "broken"))
 
 class DatabaseService:
-    """数据库操作的高层服务（外观模式）。
-
-    此类协调适配器、校验器和其他组件，为数据库操作提供简化接口。
-
-    示例：
-        service = DatabaseService(adapter_registry)
-        result = await service.execute_query(
-            DatabaseType.POSTGRESQL,
-            "mydb",
-            "postgresql://...",
-            "SELECT * FROM users"
-        )
-    """
-
-    def __init__(self, registry: DatabaseAdapterRegistry):
-        """使用适配器注册表初始化服务。
-
-        参数：
-            registry：数据库适配器注册表。
-        """
+    def __init__(self, registry):
         self.registry = registry
-        logger.info("Initialized DatabaseService")
+        logger.info("Initialized DatabaseService with tenacity retry policy")
 
-    async def test_connection(
-        self, db_type: DatabaseType, url: str
-    ) -> Tuple[bool, Optional[str]]:
-        """测试数据库连接。
+    async def _with_retry(self, operation, desc):
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(settings.retry_max_attempts),
+                wait=wait_exponential_jitter(initial=settings.retry_min_wait_seconds, max=settings.retry_max_wait_seconds),
+                retry=retry_if_exception_type(Exception), reraise=True,
+            ):
+                with attempt: return await operation()
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else e
+            logger.error("[retry] %s exhausted: %s", desc, last); raise
 
-        参数：
-            db_type：数据库类型。
-            url：连接 URL。
-
-        返回：
-            由 (success, error_message) 组成的元组。
-
-        示例：
-            success, error = await service.test_connection(
-                DatabaseType.POSTGRESQL,
-                "postgresql://localhost/test"
-            )
-        """
+    async def test_connection(self, db_type, url):
         config = ConnectionConfig(url=url, name="connection_test")
         adapter = self.registry.create_adapter(db_type, config)
-        try:
-            return await adapter.test_connection()
-        finally:
-            await adapter.close_connection_pool()
+        try: return await adapter.test_connection()
+        finally: await adapter.close_connection_pool()
 
-    async def execute_query(
-        self,
-        db_type: DatabaseType,
-        name: str,
-        url: str,
-        sql: str,
-        limit: int = 1000,
-    ) -> Tuple[QueryResult, int]:
-        """执行 SQL 查询。
-
-        参数：
-            db_type：数据库类型。
-            name：连接名称。
-            url：连接 URL。
-            sql：待校验的 SQL 查询。
-            limit：最多返回的行数。
-
-        返回：
-            由 (QueryResult, execution_time_ms) 组成的元组。
-
-        异常：
-            SqlValidationError：SQL 无效。
-            Exception：查询执行失败。
-
-        示例：
-            result, time_ms = await service.execute_query(
-                DatabaseType.MYSQL,
-                "mydb",
-                "mysql://...",
-                "SELECT * FROM users"
-            )
-        """
-        # 校验并转换 SQL
+    async def execute_query(self, db_type, name, url, sql, limit=1000):
         validated_sql = validate_and_transform_sql(sql, limit=limit, db_type=db_type)
-
-        # 获取适配器
         config = ConnectionConfig(url=url, name=name)
         adapter = self.registry.get_adapter(db_type, config)
-
-        # 执行查询并统计耗时
-        start_time = time.time()
+        start = time.time()
+        async def _run(): return await adapter.execute_query(validated_sql)
         try:
-            result = await adapter.execute_query(validated_sql)
-            execution_time_ms = int((time.time() - start_time) * 1000)
+            try: result = await self._with_retry(_run, f"execute_query::{name}")
+            except Exception as exc:
+                if _is_retryable(exc):
+                    logger.warning("Transient on %s, refresh pool: %s", name, exc)
+                    await self.registry.close_adapter(db_type, name)
+                    adapter = self.registry.get_adapter(db_type, config)
+                    result = await adapter.execute_query(validated_sql)
+                else: raise
+            ms = int((time.time() - start) * 1000)
+            logger.info("Query ok on %s: %d rows in %dms", name, result.row_count, ms)
+            return result, ms
+        except Exception:
+            ms = int((time.time() - start) * 1000)
+            logger.error("Query failed on %s after %dms", name, ms, exc_info=True); raise
 
-            logger.info(
-                f"Query executed successfully on {name}: "
-                f"{result.row_count} rows in {execution_time_ms}ms"
-            )
-
-            return result, execution_time_ms
-
-        except Exception as e:
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            logger.error(f"Query failed on {name} after {execution_time_ms}ms: {e}")
-            raise
-
-    async def extract_metadata(
-        self,
-        db_type: DatabaseType,
-        name: str,
-        url: str,
-    ) -> MetadataResult:
-        """提取数据库元数据。
-
-        参数：
-            db_type：数据库类型。
-            name：连接名称。
-            url：连接 URL。
-
-        返回：
-            MetadataResult。
-
-        示例：
-            metadata = await service.extract_metadata(
-                DatabaseType.POSTGRESQL,
-                "mydb",
-                "postgresql://..."
-            )
-        """
+    async def extract_metadata(self, db_type, name, url):
         config = ConnectionConfig(url=url, name=name)
         adapter = self.registry.get_adapter(db_type, config)
+        return await self._with_retry(lambda: adapter.extract_metadata(), f"extract_metadata::{name}")
 
-        logger.info(f"Extracting metadata for {name}")
-        metadata = await adapter.extract_metadata()
-        logger.info(
-            f"Extracted metadata for {name}: "
-            f"{len(metadata.tables)} tables, {len(metadata.views)} views"
-        )
-
-        return metadata
-
-    async def close_connection(
-        self,
-        db_type: DatabaseType,
-        name: str,
-    ) -> None:
-        """关闭数据库连接。
-
-        参数：
-            db_type：数据库类型。
-            name：连接名称。
-        """
+    async def close_connection(self, db_type, name):
         await self.registry.close_adapter(db_type, name)
-        logger.info(f"Closed connection for {name}")
 
-
-# 全局服务实例
 database_service = DatabaseService(adapter_registry)

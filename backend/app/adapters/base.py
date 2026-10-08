@@ -1,4 +1,5 @@
 """数据库适配器的基类与数据结构。"""
+from app.config import settings
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Tuple, Optional
@@ -19,9 +20,9 @@ class ConnectionConfig:
     """
     url: str
     name: str
-    min_pool_size: int = 1
-    max_pool_size: int = 5
-    command_timeout: int = 60
+    min_pool_size: int = settings.db_pool_min_size
+    max_pool_size: int = settings.db_pool_max_size
+    command_timeout: int = settings.db_pool_command_timeout
 
 
 @dataclass

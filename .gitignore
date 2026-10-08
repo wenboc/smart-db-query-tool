@@ -1,35 +1,11 @@
-# Python
 __pycache__/
-*.py[cod]
-*.egg-info/
+*.pyc
 .venv/
-*.egg
-
-# Node
-node_modules/
-dist/
-.vite/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environment
-.env
-*.local
-
-# Database
+venv/
 *.db
-*.sqlite3
-
-# Debug
-.dbg/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
+*.sqlite
+.env
+node_modules/
+frontend/dist/
 *.log
+.DS_Store

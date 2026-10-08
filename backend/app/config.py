@@ -7,8 +7,8 @@ from pathlib import Path
 class Settings(BaseSettings):
     """应用配置。"""
 
-    # OpenAI API 配置
-    openai_api_key: str
+    # OpenAI API 配置（默认占位值，生产环境通过 .env 注入）
+    openai_api_key: str = "sk-demo-placeholder"
 
     # 数据目录
     db_explorer_data_dir: str = str(Path.home() / ".db_explorer")
@@ -28,13 +28,23 @@ class Settings(BaseSettings):
     db_pool_max_size: int = 5
     db_pool_command_timeout: int = 60
 
-    # 元数据缓存配置
+    # 元数据缓存配置（已接入 metadata 服务）
     metadata_cache_hours: int = 24
+
+    # ---------- 弹性：重试/退避 ----------
+    retry_max_attempts: int = 3
+    retry_min_wait_seconds: float = 0.5
+    retry_max_wait_seconds: float = 10.0
+
+    # ---------- 速率限制 ----------
+    rate_limit_per_minute: int = 60
+    rate_limit_per_minute_burst: int = 100
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     @property
